@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BharatPath: Indian City Shortest Route Finder</title>
+<style>
+:root{--bg:#f3f1ea;--panel:#fffdf8;--ink:#1d2a2f;--muted:#5d6b70;--line:#d9d5c7;--edge:#b9b5a6;--node:#e7efe9;--nodeStroke:#2f5d50;--route:#d1431f;--src:#2f8f5b;--dst:#e0a100;--accent:#17493c}
+@media (prefers-color-scheme:dark){:root{--bg:#10181a;--panel:#172124;--ink:#e8eeea;--muted:#9bacaa;--line:#2b3a3d;--edge:#4a5b5e;--node:#1f3331;--nodeStroke:#6fb89f;--route:#ff7a4d;--src:#4cc585;--dst:#f2c230;--accent:#8fd6bd}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 Georgia,"Times New Roman",serif}
+h1,label,button,select,.num{font-family:"Segoe UI",system-ui,sans-serif}
+header{padding:28px 20px 8px;max-width:1200px;margin:0 auto}
+h1{margin:0;font-size:clamp(26px,4vw,38px);color:var(--accent)}
+header p{margin:6px 0 0;color:var(--muted);max-width:60ch}
+main{max-width:1200px;margin:0 auto;padding:12px 20px 40px;display:grid;grid-template-columns:minmax(0,320px) minmax(0,1fr);gap:20px}
+@media(max-width:860px){main{grid-template-columns:1fr}}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px}
+label{display:block;font-size:13px;font-weight:600;color:var(--muted);margin:0 0 4px}
+select{width:100%;padding:10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font-size:15px}
+.row{display:flex;gap:8px;align-items:flex-end;margin-bottom:12px}.row>div{flex:1}
+button{cursor:pointer;border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:6px;padding:10px 12px;font-size:15px}
+button.go{width:100%;background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+button:focus-visible,select:focus-visible{outline:3px solid var(--route);outline-offset:2px}
+.hint{font-size:13px;color:var(--muted);margin:12px 0 0}
+#result{margin-top:16px}
+.total{font-size:34px;font-weight:700;color:var(--route);line-height:1.1}
+.meta{color:var(--muted);font-size:14px;margin:2px 0 12px}
+ol{margin:0;padding:0;list-style:none}
+ol li{display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-top:1px solid var(--line);font-size:15px}
+ol li span:last-child{font-family:"Segoe UI",system-ui,sans-serif;font-weight:600;white-space:nowrap}
+.err{color:var(--route);font-weight:600}
+.mapwrap{padding:8px}svg{width:100%;height:auto;display:block}
+.edge{stroke:var(--edge);stroke-width:1.5}
+.elabel{font:10px "Segoe UI",system-ui,sans-serif;fill:var(--muted);paint-order:stroke;stroke:var(--panel);stroke-width:3px}
+.elabel.on{fill:var(--route);font-weight:700;font-size:12px}
+.route{stroke:var(--route);stroke-width:5;fill:none;stroke-linecap:round;stroke-dasharray:1;stroke-dashoffset:1;animation:draw .5s linear forwards}
+@keyframes draw{to{stroke-dashoffset:0}}
+.node{cursor:pointer}
+.node circle{fill:var(--node);stroke:var(--nodeStroke);stroke-width:2}
+.node.on circle{fill:var(--route);stroke:var(--route)}
+.node.src circle{fill:var(--src);stroke:var(--src)}
+.node.dst circle{fill:var(--dst);stroke:var(--dst)}
+.node text{font:600 12px "Segoe UI",system-ui,sans-serif;fill:var(--ink);paint-order:stroke;stroke:var(--panel);stroke-width:3px;pointer-events:none}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font:13px "Segoe UI",system-ui,sans-serif;color:var(--muted);padding:6px 10px}
+.legend i{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:5px}
+@media(prefers-reduced-motion:reduce){.route{animation:none;stroke-dashoffset:0}}
+</style>
+</head>
+<body>
+<header>
+  <h1>BharatPath</h1>
+  <p>Shortest road route between 16 Indian cities. The route is calculated in Python (Flask) using Dijkstra’s algorithm.</p>
+</header>
+<main>
+  <section class="panel">
+    <div class="row">
+      <div><label for="src">From</label><select id="src"></select></div>
+      <button id="swap" aria-label="Swap cities">⇄</button>
+    </div>
+    <div class="row"><div><label for="dst">To</label><select id="dst"></select></div></div>
+    <button class="go" id="go">Find shortest route</button>
+    <p class="hint">Tip: click two cities on the map. Distances are illustrative values for demonstration.</p>
+    <div id="result" aria-live="polite"></div>
+  </section>
+  <section class="panel mapwrap">
+    <svg id="map" viewBox="0 0 900 620" role="img" aria-label="Road network map"></svg>
+    <div class="legend">
+      <span><i style="background:var(--src)"></i>Start</span>
+      <span><i style="background:var(--dst)"></i>Destination</span>
+      <span><i style="background:var(--route)"></i>On route</span>
+      <span>Time complexity: O((V + E) log V)</span>
+    </div>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const svg = $("map"), NS = "http://www.w3.org/2000/svg";
+let G = null, clickStep = 0;
+const P = c => [60 + (G.positions[c][0] - 1) * 110, 560 - (G.positions[c][1] + 0.5) * 62];
+
+function el(tag, attrs, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  (parent || svg).appendChild(e);
+  return e;
+}
+
+function draw(route) {
+  svg.innerHTML = "";
+  const onRoute = new Set(route || []);
+  const routeEdges = new Set();
+  if (route) for (let i = 0; i < route.length - 1; i++) routeEdges.add([route[i], route[i + 1]].sort().join("|"));
+
+  for (const e of G.edges) {
+    const [x1, y1] = P(e.from), [x2, y2] = P(e.to);
+    el("line", {class: "edge", x1, y1, x2, y2});
+    if (!routeEdges.has([e.from, e.to].sort().join("|"))) {
+      const t = el("text", {class: "elabel", x: (x1 + x2) / 2, y: (y1 + y2) / 2, "text-anchor": "middle", "dominant-baseline": "middle"});
+      t.textContent = e.distance;
+    }
+  }
+  if (route) {
+    for (let i = 0; i < route.length - 1; i++) {
+      const [x1, y1] = P(route[i]), [x2, y2] = P(route[i + 1]);
+      const l = el("line", {class: "route", x1, y1, x2, y2, pathLength: 1});
+      l.style.animationDelay = (i * 0.35) + "s";
+    }
+    for (const e of G.edges) if (routeEdges.has([e.from, e.to].sort().join("|"))) {
+      const [x1, y1] = P(e.from), [x2, y2] = P(e.to);
+      const t = el("text", {class: "elabel on", x: (x1 + x2) / 2, y: (y1 + y2) / 2, "text-anchor": "middle", "dominant-baseline": "middle"});
+      t.textContent = e.distance;
+    }
+  }
+  const s = $("src").value, d = $("dst").value;
+  for (const c of G.cities) {
+    const [x, y] = P(c);
+    const g = el("g", {class: "node" + (c === s ? " src" : c === d ? " dst" : onRoute.has(c) ? " on" : ""), tabindex: 0, role: "button", "aria-label": c});
+    el("circle", {cx: x, cy: y, r: 11}, g);
+    const t = el("text", {x, y: y - 17, "text-anchor": "middle"}, g);
+    t.textContent = c;
+    g.addEventListener("click", () => pick(c));
+    g.addEventListener("keydown", ev => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); pick(c); } });
+  }
+}
+
+function pick(c) {
+  if (clickStep === 0) {
+    $("src").value = c; clickStep = 1; draw(null);
+    $("result").innerHTML = `<p class="hint">Start set to ${c}. Now click the destination.</p>`;
+  } else {
+    $("dst").value = c; clickStep = 0; run();
+  }
+}
+
+async function run() {
+  clickStep = 0;
+  const out = $("result");
+  const q = new URLSearchParams({source: $("src").value, destination: $("dst").value});
+  try {
+    const res = await fetch("/api/route?" + q);
+    const data = await res.json();
+    if (!res.ok) { draw(null); out.innerHTML = `<p class="err">${data.error}</p>`; return; }
+    draw(data.route);
+    const hrs = data.total / 60, h = Math.floor(hrs), m = Math.round((hrs - h) * 60);
+    const steps = data.segments.map(s => `<li><span>${s.from} to ${s.to}</span><span>${s.distance} km</span></li>`).join("");
+    out.innerHTML = `<div class="total num">${data.total.toLocaleString("en-IN")} km</div>
+      <div class="meta">${data.segments.length} road segment${data.segments.length > 1 ? "s" : ""} · about ${h} h ${m} min at 60 km/h</div>
+      <ol>${steps}</ol>`;
+  } catch (err) {
+    out.innerHTML = `<p class="err">Could not reach the server. Is app.py running?</p>`;
+  }
+}
+
+async function init() {
+  G = await (await fetch("/api/graph")).json();
+  for (const s of [$("src"), $("dst")]) s.innerHTML = G.cities.map(c => `<option>${c}</option>`).join("");
+  $("src").value = "Ludhiana"; $("dst").value = "Kochi";
+  $("go").onclick = run;
+  $("src").onchange = $("dst").onchange = run;
+  $("swap").onclick = () => { const t = $("src").value; $("src").value = $("dst").value; $("dst").value = t; run(); };
+  run();
+}
+init();
+</script>
+</body>
+</html>
